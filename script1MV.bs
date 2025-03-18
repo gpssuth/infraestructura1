@@ -1,0 +1,78 @@
+#!/bin/bash
+
+# Variables configurables
+RESOURCE_GROUP="mi-grupo-de-recursos"
+LOCATION="eastus"  # Cambia la región si es necesario
+VM_NAME="mi-maquina-virtual"
+VM_SIZE="Standard_B2s"  # Tamaño de la VM (puedes cambiarlo)
+OS_IMAGE="UbuntuLTS"  # Imagen de Linux (Ubuntu)
+DISK_NAME="mi-disco-2tb"
+DISK_SIZE=2048  # Tamaño del disco en GB (2 TB = 2048 GB)
+ADMIN_USERNAME="azureuser"  # Nombre de usuario para la VM
+SSH_KEY_PATH="~/.ssh/id_rsa.pub"  # Ruta a tu clave SSH pública
+
+# Crear un grupo de recursos
+echo "Creando grupo de recursos..."
+az group create --name $RESOURCE_GROUP --location $LOCATION
+
+# Crear una máquina virtual con Linux (Ubuntu)
+echo "Creando máquina virtual..."
+az vm create \
+  --resource-group $RESOURCE_GROUP \
+  --name $VM_NAME \
+  --image $OS_IMAGE \
+  --size $VM_SIZE \
+  --admin-username $ADMIN_USERNAME \
+  --ssh-key-value $SSH_KEY_PATH \
+  --public-ip-sku Standard
+
+# Añadir un disco de 2 TB a la máquina virtual
+echo "Añadiendo disco de 2 TB..."
+az vm disk attach \
+  --resource-group $RESOURCE_GROUP \
+  --vm-name $VM_NAME \
+  --name $DISK_NAME \
+  --size-gb $DISK_SIZE \
+  --new
+
+# Obtener la dirección IP pública de la VM
+PUBLIC_IP=$(az vm show --resource-group $RESOURCE_GROUP --name $VM_NAME --show-details --query "publicIps" --output tsv)
+echo "La IP pública de la VM es: $PUBLIC_IP"
+
+# Conectar a la VM y configurar Laravel
+echo "Conectando a la VM para instalar Laravel..."
+ssh -o StrictHostKeyChecking=no $ADMIN_USERNAME@$PUBLIC_IP << 'EOF'
+  # Actualizar el sistema
+  sudo apt update && sudo apt upgrade -y
+
+  # Instalar dependencias necesarias
+  sudo apt install -y curl git unzip
+
+  # Instalar PHP y extensiones necesarias para Laravel
+  sudo apt install -y php php-cli php-mbstring php-xml php-zip php-mysql php-curl
+
+  # Instalar Composer (gestor de dependencias de PHP)
+  curl -sS https://getcomposer.org/installer | php
+  sudo mv composer.phar /usr/local/bin/composer
+
+  # Crear un proyecto Laravel
+  composer create-project --prefer-dist laravel/laravel mi-proyecto-laravel
+
+  # Mover el proyecto a la raíz del servidor web (opcional)
+  sudo mv mi-proyecto-laravel /var/www/html/
+
+  # Configurar permisos
+  sudo chown -R www-data:www-data /var/www/html/mi-proyecto-laravel
+  sudo chmod -R 755 /var/www/html/mi-proyecto-laravel
+
+  # Instalar un servidor web (Apache o Nginx)
+  sudo apt install -y apache2
+
+  # Configurar Apache para servir Laravel
+  sudo a2enmod rewrite
+  sudo systemctl restart apache2
+
+  echo "¡Laravel ha sido instalado y configurado correctamente!"
+EOF
+
+echo "Proceso completado. Accede a tu aplicación Laravel en: http://$PUBLIC_IP"
